@@ -10,6 +10,7 @@ const services = [
   { id: "portfolio-risk", title: "Portfolio Risk", icon: ShieldCheck, purpose: "Prepare a consistent portfolio-at-risk report for analysis and review.", required: "One CSV portfolio risk report", output: "PortfolioRiskReport_Clean.csv", endpoint: "/api/clean-portfolio-risk", fields: ["file"] },
   { id: "loan-arrears", title: "Loan Arrears", icon: Activity, purpose: "Clean arrears records and normalize balances, officers, branches, and dates.", required: "One CSV loan arrears report", output: "LoanArrears_Clean.csv", endpoint: "/api/clean-loan-arrears", fields: ["file"] },
   { id: "ro-dashboard", title: "RO Performance Dashboard", icon: BarChart3, purpose: "Match officers to targets and generate a weekly and month-to-date performance workbook.", required: "Loan CSV + Targets.xlsx", output: "RO_Performance_Dashboard.xlsx", endpoint: "/api/ro-performance-dashboard", fields: ["loan_file", "targets_file"] },
+  { id: "par-performance", title: "PAR Performance", icon: BarChart3, purpose: "Rank active loan officers by portfolio-at-risk performance and produce a company total report.", required: "Portfolio Risk CSV + Targets.xlsx", output: "PAR_Performance_Report.xlsx", endpoint: "/api/par-performance", fields: ["par_file", "targets_file"] },
 ];
 
 function App() {
@@ -20,12 +21,12 @@ function App() {
   const addJob = (job) => setJobs((current) => [job, ...current]);
   return <div className="app-shell">
     <aside className={sidebarOpen ? "sidebar open" : "sidebar"}>
-      <div className="brand"><div className="brand-mark">P</div><div><strong>EasyAnalysis</strong><span>by Panta Development and AI</span></div><button className="icon-btn mobile-close" onClick={() => setSidebarOpen(false)}><X size={18} /></button></div>
+      <div className="brand"><div className="brand-mark">E</div><div><strong>EasyAnalysis</strong><span>by Panta Development and AI</span></div><button className="icon-btn mobile-close" onClick={() => setSidebarOpen(false)}><X size={18} /></button></div>
       <div className="workspace-label">WORKSPACE</div>
       <nav>{[["workspace", LayoutDashboard, "Workspace"], ["history", History, "History"], ["profile", UserCircle2, "Profile"], ["settings", Settings, "Settings"]].map(([id, Icon, label]) => <button className={page === id ? "nav-item active" : "nav-item"} key={id} onClick={() => { setPage(id); setSidebarOpen(false); }}><Icon size={18} />{label}</button>)}</nav>
       <div className="sidebar-footer"><div className="plan"><div className="plan-icon"><ShieldCheck size={17} /></div><div><b>Business workspace</b><span>Secure processing enabled</span></div></div><button className="nav-item"><LogOut size={18} />Sign out</button></div>
     </aside>
-    <main className="main"><header className="topbar"><button className="icon-btn menu-btn" onClick={() => setSidebarOpen(true)}><Menu size={20} /></button><div className="breadcrumbs"><span>Workspace</span><ArrowRight size={14} /><b>{page[0].toUpperCase() + page.slice(1)}</b></div><div className="user"><div><b>Finance team</b><span>Administrator</span></div><div className="avatar">FT</div></div></header>
+    <main className="main"><header className="topbar"><button className="icon-btn menu-btn" onClick={() => setSidebarOpen(true)}><Menu size={20} /></button><div className="breadcrumbs"><span>Workspace</span><ArrowRight size={14} /><b>{page[0].toUpperCase() + page.slice(1)}</b></div><div className="user"><div><b>DataTeam</b><span>Administrator</span></div><div className="avatar">DT</div></div></header>
       {page === "workspace" && <Workspace onSelect={setActive} jobs={jobs} />}
       {page === "history" && <HistoryPage jobs={jobs} />}
       {page === "profile" && <ProfilePage />}

@@ -10,6 +10,7 @@ from backend.services.processing import (
     clean_loan_arrears,
     clean_portfolio_risk,
     generate_ro_dashboard,
+    generate_par_performance,
 )
 from backend.utils.files import save_upload, validate_extension
 
@@ -79,6 +80,23 @@ async def ro_performance_dashboard_endpoint(
         output_path = Path(directory) / "RO_Performance_Dashboard.xlsx"
         try:
             generate_ro_dashboard(loan_path, targets_path, output_path)
+        except ProcessingError as error:
+            raise _invalid_report(error) from error
+        return _download(output_path, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+
+@router.post("/par-performance")
+async def par_performance_endpoint(
+    par_file: UploadFile = File(...), targets_file: UploadFile = File(...)
+):
+    validate_extension(par_file, {".csv"})
+    validate_extension(targets_file, {".xlsx", ".xls"})
+    with TemporaryDirectory(prefix="easyanalysis-") as directory:
+        par_path = await save_upload(par_file, Path(directory))
+        targets_path = await save_upload(targets_file, Path(directory))
+        output_path = Path(directory) / "PAR_Performance_Report.xlsx"
+        try:
+            generate_par_performance(par_path, targets_path, output_path)
         except ProcessingError as error:
             raise _invalid_report(error) from error
         return _download(output_path, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")

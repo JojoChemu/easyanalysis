@@ -427,3 +427,163 @@ def _format_dashboard(output_path: Path, report_date) -> None:
     worksheet.auto_filter.ref = None
     worksheet.row_dimensions[3].height = 35
     workbook.save(output_path)
+
+
+def generate_par_performance(par_path: Path, target_path: Path, output_path: Path) -> None:
+    """File-based version of parautomation.py; report logic is unchanged."""
+    try:
+        par = pd.read_csv(par_path)
+        targets = pd.read_excel(target_path)
+
+        def par_normalize_column(col):
+            col = str(col).strip().upper().replace("_", " ")
+            return " ".join(col.split())
+
+        par.columns = [par_normalize_column(c) for c in par.columns]
+        targets.columns = [par_normalize_column(c) for c in targets.columns]
+
+        def par_find_column(columns, possibilities):
+            for option in possibilities:
+                if option in columns:
+                    return option
+            return None
+
+        loan_officer_col = par_find_column(par.columns, ["LOANOFFICERNAME", "LOAN OFFICER", "LOAN OFFICER NAME", "OFFICER"])
+        principal_col = par_find_column(par.columns, ["OUTSTANDING PRINCIPAL", "PRINCIPAL"])
+        par_amount_col = par_find_column(par.columns, ["PORTFOLIOATRISK(PAR)", "PORTFOLIO AT RISK", "PAR"])
+        target_officer_col = par_find_column(targets.columns, ["LOAN OFFICER"])
+        ro_code_col = par_find_column(targets.columns, ["RO CODE", "CODE"])
+        if not all([loan_officer_col, principal_col, par_amount_col, target_officer_col, ro_code_col]):
+            raise ProcessingError(_friendly_error())
+
+        par = par.rename(columns={loan_officer_col: "LOAN OFFICER", principal_col: "OUTSTANDING PRINCIPAL", par_amount_col: "PORTFOLIO AT RISK"})
+        targets = targets.rename(columns={target_officer_col: "LOAN OFFICER", ro_code_col: "RO CODE"})
+
+        def par_clean_text(text):
+            if pd.isna(text):
+                return ""
+            text = str(text).upper().strip()
+            text = re.sub(r"\s+", " ", text)
+            return re.sub(r"[^\w\s]", "", text)
+
+        def par_clean_money(series):
+            return pd.to_numeric(
+                series.astype(str).str.replace(",", "", regex=False).str.replace("KES", "", regex=False).str.replace("KSH", "", regex=False).str.strip(),
+                errors="coerce",
+            )
+
+        par["LOAN OFFICER"] = par["LOAN OFFICER"].apply(par_clean_text)
+        targets["LOAN OFFICER"] = targets["LOAN OFFICER"].apply(par_clean_text)
+        par["OUTSTANDING PRINCIPAL"] = par_clean_money(par["OUTSTANDING PRINCIPAL"])
+        par["PORTFOLIO AT RISK"] = par_clean_money(par["PORTFOLIO AT RISK"])
+        par = par.dropna(how="all")
+        par = par[par["LOAN OFFICER"] != ""]
+        par = par[~par["LOAN OFFICER"].str.upper().str.contains("TOTAL", na=False)]
+        targets = targets.drop_duplicates(subset="LOAN OFFICER").reset_index(drop=True)
+
+        def par_normalize_name(name):
+            words = par_clean_text(name).split()
+            cleaned = []
+            for word in words:
+                if len(word) == 1:
+                    continue
+                if word in ["MR", "MRS", "MISS", "MS", "DR", "REV", "PASTOR"]:
+                    continue
+                cleaned.append(word)
+            return " ".join(sorted(cleaned))
+
+        official_lookup = {par_normalize_name(officer): officer for officer in targets["LOAN OFFICER"]}
+        official_keys = list(official_lookup.keys())
+        name_changes = {}
+        for officer in par["LOAN OFFICER"].unique():
+            normalized = par_normalize_name(officer)
+            if normalized in official_lookup:
+                name_changes[officer] = official_lookup[normalized]
+                continue
+            match = process.extractOne(normalized, official_keys, scorer=fuzz.token_sort_ratio)
+            if match and match[1] >= 80:
+                name_changes[officer] = official_lookup[match[0]]
+        par["LOAN OFFICER"] = par["LOAN OFFICER"].replace(name_changes)
+        missing = sorted(set(par["LOAN OFFICER"]) - set(targets["LOAN OFFICER"]))
+        print("Unmatched officers:", missing)
+
+        company_principal = par["OUTSTANDING PRINCIPAL"].sum()
+        company_par = par["PORTFOLIO AT RISK"].sum()
+        company_percentage = company_par / company_principal * 100 if company_principal > 0 else 0
+        active_par = par[par["LOAN OFFICER"].isin(targets["LOAN OFFICER"])].copy()
+        summary = active_par.groupby("LOAN OFFICER", as_index=False).agg({"OUTSTANDING PRINCIPAL": "sum", "PORTFOLIO AT RISK": "sum"})
+        report = targets.merge(summary, on="LOAN OFFICER", how="left")
+        report["HAS PORTFOLIO"] = report["OUTSTANDING PRINCIPAL"].notna()
+        report["OUTSTANDING PRINCIPAL"] = report["OUTSTANDING PRINCIPAL"].fillna(0)
+        report["PORTFOLIO AT RISK"] = report["PORTFOLIO AT RISK"].fillna(0)
+        report["PAR %"] = np.where(report["OUTSTANDING PRINCIPAL"] > 0, (report["PORTFOLIO AT RISK"] / report["OUTSTANDING PRINCIPAL"]) * 100, 0)
+        report = report.sort_values(by=["HAS PORTFOLIO", "PAR %"], ascending=[False, True])
+        report.reset_index(drop=True, inplace=True)
+        report.insert(0, "RANK", range(1, len(report) + 1))
+        for col in ["OUTSTANDING PRINCIPAL", "PORTFOLIO AT RISK", "PAR %"]:
+            report.loc[report["HAS PORTFOLIO"] == False, col] = "-"
+        report = report[["RANK", "RO CODE", "LOAN OFFICER", "OUTSTANDING PRINCIPAL", "PORTFOLIO AT RISK", "PAR %"]]
+        company_total = pd.DataFrame([{"RANK": "", "RO CODE": "", "LOAN OFFICER": "COMPANY TOTAL", "OUTSTANDING PRINCIPAL": company_principal, "PORTFOLIO AT RISK": company_par, "PAR %": company_percentage}])
+        report = pd.concat([report, company_total], ignore_index=True)
+        report.to_excel(output_path, index=False)
+        _format_par_report(output_path)
+    except ProcessingError:
+        raise
+    except (KeyError, ValueError, TypeError) as error:
+        raise ProcessingError(_friendly_error()) from error
+
+
+def _format_par_report(output_path: Path) -> None:
+    """Original PAR workbook formatting, excluding only Colab download."""
+    workbook = load_workbook(output_path)
+    worksheet = workbook.active
+    worksheet.insert_rows(1, 2)
+    worksheet["A1"] = "FYNESS NOTES CREDIT LIMITED"
+    worksheet["A2"] = "PAR PERFORMANCE REPORT"
+    last_column = worksheet.max_column
+    worksheet.merge_cells(start_row=1, start_column=1, end_row=1, end_column=last_column)
+    worksheet.merge_cells(start_row=2, start_column=1, end_row=2, end_column=last_column)
+    blue = PatternFill(fill_type="solid", start_color="1F4E78")
+    worksheet["A1"].fill = blue
+    worksheet["A1"].font = Font(bold=True, color="FFFFFF", size=18)
+    worksheet["A2"].font = Font(bold=True, italic=True, size=12)
+    worksheet["A1"].alignment = Alignment(horizontal="center")
+    worksheet["A2"].alignment = Alignment(horizontal="center")
+    header_fill = PatternFill(fill_type="solid", start_color="4472C4")
+    header_font = Font(bold=True, color="FFFFFF")
+    for cell in worksheet[3]:
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+    par_column = next(cell.column for cell in worksheet[3] if cell.value == "PAR %")
+    par_letter = get_column_letter(par_column)
+    worksheet.conditional_formatting.add(f"{par_letter}4:{par_letter}{worksheet.max_row-1}", ColorScaleRule(start_type="min", start_color="63BE7B", mid_type="percentile", mid_value=50, mid_color="FFEB84", end_type="max", end_color="F8696B"))
+    for cell in worksheet[3]:
+        if cell.value in ["OUTSTANDING PRINCIPAL", "PORTFOLIO AT RISK"]:
+            letter = get_column_letter(cell.column)
+            for row in range(4, worksheet.max_row + 1):
+                worksheet[f"{letter}{row}"].number_format = "#,##0.00"
+        if cell.value == "PAR %":
+            letter = get_column_letter(cell.column)
+            for row in range(4, worksheet.max_row + 1):
+                worksheet[f"{letter}{row}"].number_format = "0.00"
+    thin = Side(style="thin")
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+    for row in worksheet.iter_rows():
+        for cell in row:
+            cell.border = border
+    for column in worksheet.columns:
+        max_length = 0
+        letter = get_column_letter(column[0].column)
+        for cell in column:
+            if cell.value:
+                max_length = max(max_length, len(str(cell.value)))
+        worksheet.column_dimensions[letter].width = max_length + 3
+    worksheet.freeze_panes = "D4"
+    total_row = worksheet.max_row
+    dark_blue = PatternFill(fill_type="solid", start_color="1F4E78")
+    white_font = Font(bold=True, color="FFFFFF")
+    for cell in worksheet[total_row]:
+        cell.fill = dark_blue
+        cell.font = white_font
+    workbook.save(output_path)
