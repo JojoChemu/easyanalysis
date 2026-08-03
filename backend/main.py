@@ -32,3 +32,12 @@ health_dir.mkdir(exist_ok=True)
 def health_check() -> dict[str, str]:
     return {"status": "ok", "service": "easyanalysis-by-panta"}
 
+
+@app.get("/")
+def root() -> dict[str, str]:
+    return {
+        "service": "EasyAnalysis by Panta Development and AI",
+        "status": "online",
+        "health": "/health",
+    }
+
