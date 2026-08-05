@@ -10,13 +10,15 @@ from backend.routers.auth import router as auth_router
 
 
 app = FastAPI(title="EasyAnalysis by Panta Development and AI", version="1.0.0")
+frontend_url = os.getenv("FRONTEND_URL", "https://your-site.netlify.app").rstrip("/")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:5173",
         "http://localhost:4173",
-        os.getenv("FRONTEND_URL", "https://your-site.netlify.app"),
+        frontend_url,
     ],
+    allow_origin_regex=r"https://[a-zA-Z0-9-]+\.netlify\.app$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
