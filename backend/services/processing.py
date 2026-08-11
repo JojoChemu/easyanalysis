@@ -81,7 +81,7 @@ def clean_all_loans(input_path: Path, output_path: Path) -> None:
     try:
         df = pd.read_csv(input_path)
         _require_columns(df, ["Account Number", "Branch", "Loan Officer", "Total Loan Amount", "Disbursement Date"])
-        df["Account Number"] = clean_account(df["Account Number"])
+        df["Account Number"] = df["Account Number"].fillna("").astype(str).str.replace(r"\.0$", "", regex=True).str.strip()
         duplicates = df["Account Number"].duplicated().sum()
         print("Duplicate Account Numbers:", duplicates)
         df = df.dropna(how="all")
@@ -242,6 +242,218 @@ def normalize_name(name):
             continue
         cleaned.append(word)
     return " ".join(sorted(cleaned))
+
+
+def clean_repayment_report(input_path: Path, output_path: Path) -> None:
+    """File-based version of Fyness_Clean_LoanRepaymentReport_for_PowerBI.ipynb."""
+    try:
+        if input_path.suffix.lower() == ".csv":
+            df = pd.read_csv(input_path)
+        else:
+            df = pd.read_excel(input_path)
+
+        df.columns = [re.sub(r"\s+", " ", str(column).strip()) for column in df.columns]
+        required = [
+            "Repayment Date", "Transaction Number", "Account Number", "Client Name",
+            "Branch", "Loan Officer", "PrincipalAmountRepaid", "InterestAmountRepaid",
+            "Charges", "TotalAmountRepaid",
+        ]
+        _require_columns(df, required)
+        # Preserve the notebook's exact, case-sensitive field names after whitespace cleanup.
+        missing = [column for column in required if column not in df.columns]
+        if missing:
+            raise ProcessingError("The following required columns are missing:\n" + "\n".join(missing))
+
+        df = df.dropna(how="all").copy()
+        df["Account Number"] = clean_account(df["Account Number"])
+        df["Client Name"] = clean_text(df["Client Name"])
+        df["Branch"] = clean_branch(df["Branch"])
+        df["Loan Officer"] = clean_text(df["Loan Officer"])
+        df["Transaction Number"] = df["Transaction Number"].fillna("").astype(str).str.replace(r"\.0$", "", regex=True).str.strip()
+        df["Repayment Date"] = pd.to_datetime(df["Repayment Date"], errors="coerce")
+
+        money_columns = ["PrincipalAmountRepaid", "InterestAmountRepaid", "Charges", "TotalAmountRepaid"]
+        for column in money_columns:
+            df[column] = pd.to_numeric(
+                df[column].fillna("").astype(str)
+                .str.replace(",", "", regex=False)
+                .str.replace("KES", "", regex=False)
+                .str.replace("KSH", "", regex=False)
+                .str.strip(), errors="coerce"
+            )
+
+        df = df[df["Repayment Date"].notna()]
+        df = df[df["Account Number"].ne("")]
+        df = df[df["Branch"].ne("")]
+        df = df[df["Loan Officer"].ne("")].copy()
+        df["Year"] = df["Repayment Date"].dt.year
+        df["Month Number"] = df["Repayment Date"].dt.month
+        df["Month"] = df["Repayment Date"].dt.strftime("%B")
+        df["Month Year"] = df["Repayment Date"].dt.strftime("%b %Y")
+        df["Month Start"] = df["Repayment Date"].dt.to_period("M").dt.to_timestamp()
+        df.to_excel(output_path, index=False)
+        df.to_csv(output_path.with_suffix(".csv"), index=False)
+        _format_repayment_report(output_path)
+    except ProcessingError:
+        raise
+    except (KeyError, ValueError, TypeError, ImportError) as error:
+        raise ProcessingError(_friendly_error()) from error
+
+
+def _format_repayment_report(output_path: Path) -> None:
+    workbook = load_workbook(output_path)
+    worksheet = workbook.active
+    worksheet.insert_rows(1, 2)
+    worksheet["A1"] = "FYNESS NOTES CREDIT LIMITED"
+    worksheet["A2"] = "Cleaned Loan Repayment Report - Power BI Source"
+    last_column = worksheet.max_column
+    worksheet.merge_cells(start_row=1, start_column=1, end_row=1, end_column=last_column)
+    worksheet.merge_cells(start_row=2, start_column=1, end_row=2, end_column=last_column)
+    blue = PatternFill(fill_type="solid", start_color="1F4E78")
+    header_fill = PatternFill(fill_type="solid", start_color="4472C4")
+    worksheet["A1"].fill = blue
+    worksheet["A1"].font = Font(bold=True, color="FFFFFF", size=18)
+    worksheet["A1"].alignment = Alignment(horizontal="center")
+    worksheet["A2"].font = Font(bold=True, italic=True, size=12)
+    worksheet["A2"].alignment = Alignment(horizontal="center")
+    for cell in worksheet[3]:
+        cell.fill = header_fill
+        cell.font = Font(bold=True, color="FFFFFF")
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        if cell.value in ["PrincipalAmountRepaid", "InterestAmountRepaid", "Charges", "TotalAmountRepaid"]:
+            for row in range(4, worksheet.max_row + 1):
+                worksheet.cell(row=row, column=cell.column).number_format = "#,##0.00"
+        if cell.value in ["Repayment Date", "Month Start"]:
+            for row in range(4, worksheet.max_row + 1):
+                worksheet.cell(row=row, column=cell.column).number_format = "dd-mmm-yyyy"
+    for column in worksheet.columns:
+        letter = get_column_letter(column[0].column)
+        width = max((len(str(cell.value)) for cell in column if cell.value is not None), default=0)
+        worksheet.column_dimensions[letter].width = min(width + 3, 35)
+    worksheet.freeze_panes = "A4"
+    workbook.save(output_path)
+
+
+def generate_ro_monthly_customer_mix(loan_path: Path, target_path: Path, output_path: Path) -> None:
+    """File-based version of RO_Monthly_Performance_Customer_Mix.ipynb."""
+    try:
+        loans = pd.read_csv(loan_path)
+        targets = pd.read_excel(target_path)
+        loans.columns = [normalize_column(column) for column in loans.columns]
+        targets.columns = [normalize_column(column) for column in targets.columns]
+        loan_officer_col = find_column(loans.columns, ["LOAN OFFICER", "OFFICER", "LOANOFFICER", "LOAN OFFICER NAME"])
+        date_col = find_column(loans.columns, ["DISBURSEMENT DATE", "DISBURSMENT DATE", "DATE", "BOOKING DATE"])
+        amount_col = find_column(loans.columns, ["TOTAL LOAN AMOUNT", "LOAN AMOUNT", "AMOUNT"])
+        client_ref_col = find_column(loans.columns, ["CLIENT REFERENCE ID", "CLIENT REF ID", "CLIENT REFERENCE"])
+        target_officer_col = find_column(targets.columns, ["LOAN OFFICER", "OFFICER", "LOANOFFICER"])
+        target_col = find_column(targets.columns, ["TARGETS", "TARGET", "MONTHLY TARGET"])
+        ro_code_col = find_column(targets.columns, ["RO CODE", "CODE"])
+        if not all([loan_officer_col, date_col, amount_col, client_ref_col, target_officer_col, target_col, ro_code_col]):
+            raise ProcessingError(_friendly_error())
+        loans = loans.rename(columns={loan_officer_col: "LOAN OFFICER", date_col: "DISBURSEMENT DATE", amount_col: "TOTAL LOAN AMOUNT", client_ref_col: "CLIENT REFERENCE ID"})
+        targets = targets.rename(columns={target_officer_col: "LOAN OFFICER", target_col: "TARGETS", ro_code_col: "RO CODE"})
+        loans["LOAN OFFICER"] = loans["LOAN OFFICER"].apply(clean_dashboard_text)
+        targets["LOAN OFFICER"] = targets["LOAN OFFICER"].apply(clean_dashboard_text)
+        loans["CLIENT REFERENCE ID"] = loans["CLIENT REFERENCE ID"].apply(lambda value: "" if pd.isna(value) else re.sub(r"\.0$", "", str(value).strip()))
+        for column in ["TOTAL LOAN AMOUNT"]:
+            loans[column] = pd.to_numeric(loans[column].astype(str).str.replace(",", "", regex=False).str.replace("KES", "", regex=False).str.replace("KSH", "", regex=False).str.strip(), errors="coerce")
+        targets["TARGETS"] = pd.to_numeric(targets["TARGETS"].astype(str).str.replace(",", "", regex=False).str.replace("KES", "", regex=False).str.replace("KSH", "", regex=False).str.strip(), errors="coerce")
+        loans["DISBURSEMENT DATE"] = pd.to_datetime(loans["DISBURSEMENT DATE"], errors="coerce")
+        report_date = loans["DISBURSEMENT DATE"].max()
+        if pd.isna(report_date):
+            raise ProcessingError("No valid Disbursement Date values were found.")
+        report_date = report_date.normalize()
+        start_of_month = report_date.replace(day=1)
+        targets = targets.drop_duplicates(subset="LOAN OFFICER").reset_index(drop=True)
+        official_lookup = {normalize_name(officer): officer for officer in targets["LOAN OFFICER"]}
+        changes = {}
+        for loan_name in loans["LOAN OFFICER"].unique():
+            normalized = normalize_name(loan_name)
+            if normalized in official_lookup:
+                changes[loan_name] = official_lookup[normalized]
+                continue
+            match = process.extractOne(normalized, list(official_lookup), scorer=fuzz.token_sort_ratio)
+            if match and match[1] >= 80:
+                changes[loan_name] = official_lookup[match[0]]
+        loans["LOAN OFFICER"] = loans["LOAN OFFICER"].replace(changes)
+        month_data = loans[(loans["DISBURSEMENT DATE"] >= start_of_month) & (loans["DISBURSEMENT DATE"] <= report_date)].copy()
+        history = loans[loans["CLIENT REFERENCE ID"].ne("")].groupby("CLIENT REFERENCE ID")["DISBURSEMENT DATE"].min().rename("FIRST DISBURSEMENT DATE").reset_index()
+        month_data = month_data.merge(history, on="CLIENT REFERENCE ID", how="left")
+        month_data["CUSTOMER TYPE"] = np.where(month_data["FIRST DISBURSEMENT DATE"] < start_of_month, "REPEAT", "NEW")
+        counts = month_data[month_data["CLIENT REFERENCE ID"].ne("")].groupby(["LOAN OFFICER", "CUSTOMER TYPE"])["CLIENT REFERENCE ID"].nunique().unstack(fill_value=0).reset_index()
+        amounts = month_data.groupby(["LOAN OFFICER", "CUSTOMER TYPE"])["TOTAL LOAN AMOUNT"].sum().unstack(fill_value=0).reset_index()
+        for frame, columns in [(counts, ["NEW", "REPEAT"]), (amounts, ["NEW", "REPEAT"])]:
+            for column in columns:
+                if column not in frame.columns:
+                    frame[column] = 0
+        counts = counts.rename(columns={"NEW": "NEW CUSTOMERS", "REPEAT": "REPEAT CUSTOMERS"})
+        counts["TOTAL CUSTOMERS"] = counts["NEW CUSTOMERS"] + counts["REPEAT CUSTOMERS"]
+        amounts = amounts.rename(columns={"NEW": "NEW CUSTOMER DISBURSEMENT", "REPEAT": "REPEAT CUSTOMER DISBURSEMENT"})
+        mtd = month_data.groupby("LOAN OFFICER")["TOTAL LOAN AMOUNT"].sum().reset_index().rename(columns={"TOTAL LOAN AMOUNT": "MTD DISBURSEMENT"})
+        numeric = ["MTD DISBURSEMENT", "NEW CUSTOMERS", "REPEAT CUSTOMERS", "TOTAL CUSTOMERS", "NEW CUSTOMER DISBURSEMENT", "REPEAT CUSTOMER DISBURSEMENT"]
+        report = targets.copy().merge(mtd, on="LOAN OFFICER", how="left").merge(counts, on="LOAN OFFICER", how="left").merge(amounts, on="LOAN OFFICER", how="left")
+        for column in numeric:
+            report[column] = report[column].fillna(0)
+        report["VARIANCE"] = report["MTD DISBURSEMENT"] - report["TARGETS"]
+        report["ACHIEVEMENT %"] = np.where(report["TARGETS"] > 0, report["MTD DISBURSEMENT"] / report["TARGETS"], 0)
+        report["STATUS"] = report["ACHIEVEMENT %"].apply(lambda value: "Excellent" if value >= 1 else "Good" if value >= .8 else "Average" if value >= .5 else "Needs Improvement")
+        report = report.sort_values("ACHIEVEMENT %", ascending=False).reset_index(drop=True)
+        report.insert(0, "RANK", range(1, len(report) + 1))
+        totals = {column: report[column].sum() for column in ["TARGETS"] + numeric + ["VARIANCE"]}
+        totals.update({"RANK": "", "RO CODE": "", "LOAN OFFICER": "TOTAL", "ACHIEVEMENT %": totals["MTD DISBURSEMENT"] / totals["TARGETS"] if totals["TARGETS"] else 0, "STATUS": ""})
+        report = pd.concat([report, pd.DataFrame([totals])], ignore_index=True)
+        report = report[["RANK", "RO CODE", "LOAN OFFICER", "TARGETS", "MTD DISBURSEMENT", "VARIANCE", "ACHIEVEMENT %", "STATUS", "NEW CUSTOMERS", "REPEAT CUSTOMERS", "TOTAL CUSTOMERS", "NEW CUSTOMER DISBURSEMENT", "REPEAT CUSTOMER DISBURSEMENT"]]
+        report.to_excel(output_path, index=False)
+        _format_ro_monthly_mix(output_path, report_date)
+    except ProcessingError:
+        raise
+    except (KeyError, ValueError, TypeError, ImportError) as error:
+        raise ProcessingError(_friendly_error()) from error
+
+
+def _format_ro_monthly_mix(output_path: Path, report_date) -> None:
+    workbook = load_workbook(output_path)
+    worksheet = workbook.active
+    worksheet.insert_rows(1, 2)
+    worksheet["A1"] = "FYNESS NOTES CREDIT LIMITED"
+    worksheet["A2"] = f"RO Monthly Performance & Customer Mix | {report_date.strftime('%B %Y')} | MTD as at {report_date.strftime('%d %B %Y')}"
+    last_column = worksheet.max_column
+    worksheet.merge_cells(start_row=1, start_column=1, end_row=1, end_column=last_column)
+    worksheet.merge_cells(start_row=2, start_column=1, end_row=2, end_column=last_column)
+    blue = PatternFill(fill_type="solid", start_color="1F4E78")
+    header_fill = PatternFill(fill_type="solid", start_color="4472C4")
+    worksheet["A1"].fill = blue
+    worksheet["A1"].font = Font(bold=True, color="FFFFFF", size=18)
+    worksheet["A1"].alignment = Alignment(horizontal="center")
+    worksheet["A2"].font = Font(bold=True, italic=True, size=12)
+    worksheet["A2"].alignment = Alignment(horizontal="center")
+    for cell in worksheet[3]:
+        cell.fill = header_fill
+        cell.font = Font(bold=True, color="FFFFFF")
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    currency = ["TARGETS", "MTD DISBURSEMENT", "VARIANCE", "NEW CUSTOMER DISBURSEMENT", "REPEAT CUSTOMER DISBURSEMENT"]
+    counts = ["NEW CUSTOMERS", "REPEAT CUSTOMERS", "TOTAL CUSTOMERS"]
+    for cell in worksheet[3]:
+        if cell.value in currency:
+            for row in range(4, worksheet.max_row + 1): worksheet.cell(row=row, column=cell.column).number_format = "#,##0.00"
+        if cell.value in counts:
+            for row in range(4, worksheet.max_row + 1): worksheet.cell(row=row, column=cell.column).number_format = "#,##0"
+        if cell.value == "ACHIEVEMENT %":
+            for row in range(4, worksheet.max_row + 1): worksheet.cell(row=row, column=cell.column).number_format = "0.00%"
+    for column in worksheet.columns:
+        letter = get_column_letter(column[0].column)
+        width = max((len(str(cell.value)) for cell in column if cell.value is not None), default=0)
+        worksheet.column_dimensions[letter].width = min(width + 3, 35)
+    worksheet.freeze_panes = "D4"
+    total_row = worksheet.max_row
+    for cell in worksheet[total_row]:
+        cell.fill = blue
+        cell.font = Font(bold=True, color="FFFFFF")
+    thin = Side(style="thin")
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+    for row in worksheet.iter_rows():
+        for cell in row: cell.border = border
+    workbook.save(output_path)
 
 
 def _friendly_error():
