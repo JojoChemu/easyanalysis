@@ -80,7 +80,7 @@ async def clean_repayment_report_endpoint(file: UploadFile = File(...)):
             clean_repayment_report(input_path, output_path)
         except ProcessingError as error:
             raise _invalid_report(error) from error
-        return _download(output_path, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        return _download(output_path.with_suffix(".csv"), "text/csv")
 
 
 @router.post("/ro-performance-dashboard")
