@@ -4,13 +4,25 @@ import hmac
 import os
 import secrets
 import time
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, EmailStr
-from backend.db import Base, engine, session_scope
+from sqlalchemy.exc import SQLAlchemyError
+from backend.db import initialize_database, session_scope
 from backend.models.user import Company, User
 
-Base.metadata.create_all(bind=engine)
-router = APIRouter(prefix="/auth", tags=["auth"])
+def require_database():
+    try:
+        initialize_database()
+        yield
+    except SQLAlchemyError:
+        raise HTTPException(
+            status_code=503,
+            detail="Account services are temporarily unavailable. Please try again later.",
+            headers={"Retry-After": "10"},
+        ) from None
+
+
+router = APIRouter(prefix="/auth", tags=["auth"], dependencies=[Depends(require_database)])
 SECRET = os.getenv("AUTH_SECRET", "local-development-secret-change-me")
 
 class RegisterRequest(BaseModel):

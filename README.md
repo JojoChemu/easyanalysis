@@ -42,3 +42,9 @@ Set `VITE_API_URL` for a deployed backend. The backend is ready for Railway with
 6. After Netlify gives you the final site URL, update Railway's `FRONTEND_URL` to that exact URL.
 
 Netlify cannot run the Python processing API itself. The browser needs the Netlify frontend and Railway backend to be deployed separately.
+
+### Railway database connection troubleshooting
+
+If logs say `could not translate host name "postgres.railway.internal"`, check that the PostgreSQL service is running in the same Railway project and environment as the backend. Set the backend's `DATABASE_URL` using a reference to that database service's `DATABASE_URL`, rather than a copied connection string, then deploy the variable change. Private DNS names only resolve inside their Railway project environment. Do not remove the production database URL to work around this error: the local SQLite default is not a replacement for production account storage.
+
+Database initialization happens on the first account request, with retries on subsequent requests if initialization fails. A database outage returns HTTP 503 for account operations while health checks and report processing remain available.
