@@ -17,6 +17,8 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 from rapidfuzz import fuzz, process
 
+from backend.services.report_input import read_report
+
 
 EXPECTED_COLUMNS = ["Loan Officer", "Total Loan Amount", "Disbursement Date"]
 
@@ -79,7 +81,7 @@ def clean_date(series):
 def clean_all_loans(input_path: Path, output_path: Path) -> None:
     """Faithful file-based version of 01_clean_all_loans.py."""
     try:
-        df = pd.read_csv(input_path)
+        df = read_report(input_path)
         _require_columns(df, ["Account Number", "Branch", "Loan Officer", "Total Loan Amount", "Disbursement Date"])
         df["Account Number"] = df["Account Number"].fillna("").astype(str).str.replace(r"\.0$", "", regex=True).str.strip()
         duplicates = df["Account Number"].duplicated().sum()
@@ -127,7 +129,7 @@ def clean_all_loans(input_path: Path, output_path: Path) -> None:
 def clean_portfolio_risk(input_path: Path, output_path: Path) -> None:
     """Faithful file-based version of 02_clean_portfolioriskreport.py."""
     try:
-        df = pd.read_csv(input_path)
+        df = read_report(input_path)
         _require_columns(df, ["Account Number", "Branch"])
         df["Account Number"] = clean_account(df["Account Number"])
         print("Blank Account Numbers:", df["Account Number"].eq("").sum())
@@ -172,7 +174,7 @@ def clean_portfolio_risk(input_path: Path, output_path: Path) -> None:
 def clean_loan_arrears(input_path: Path, output_path: Path) -> None:
     """Faithful file-based version of 04_clean_loan_arrears.py."""
     try:
-        df = pd.read_csv(input_path, dtype={"Account Number": str})
+        df = read_report(input_path, dtype={"Account Number": str})
         df["Account Number"].head(10)
         pd.set_option("display.float_format", "{:.0f}".format)
         df["Account Number"].head(10)
@@ -247,10 +249,7 @@ def normalize_name(name):
 def clean_repayment_report(input_path: Path, output_path: Path) -> None:
     """File-based version of Fyness_Clean_LoanRepaymentReport_for_PowerBI.ipynb."""
     try:
-        if input_path.suffix.lower() == ".csv":
-            df = pd.read_csv(input_path)
-        else:
-            df = pd.read_excel(input_path)
+        df = read_report(input_path)
 
         df.columns = [re.sub(r"\s+", " ", str(column).strip()) for column in df.columns]
         required = [
@@ -337,7 +336,7 @@ def _format_repayment_report(output_path: Path) -> None:
 def generate_ro_monthly_customer_mix(loan_path: Path, target_path: Path, output_path: Path) -> None:
     """File-based version of RO_Monthly_Performance_Customer_Mix.ipynb."""
     try:
-        loans = pd.read_csv(loan_path)
+        loans = read_report(loan_path)
         targets = pd.read_excel(target_path)
         loans.columns = [normalize_column(column) for column in loans.columns]
         targets.columns = [normalize_column(column) for column in targets.columns]
@@ -463,7 +462,7 @@ def _friendly_error():
 def generate_ro_dashboard(loan_path: Path, target_path: Path, output_path: Path) -> None:
     """Faithful file-based version of ro_performance_dashboard_automation.py."""
     try:
-        loans = pd.read_csv(loan_path)
+        loans = read_report(loan_path)
         targets = pd.read_excel(target_path)
         loans.columns = [normalize_column(c) for c in loans.columns]
         targets.columns = [normalize_column(c) for c in targets.columns]
@@ -645,7 +644,7 @@ def _format_dashboard(output_path: Path, report_date) -> None:
 def generate_par_performance(par_path: Path, target_path: Path, output_path: Path) -> None:
     """File-based version of parautomation.py; report logic is unchanged."""
     try:
-        par = pd.read_csv(par_path)
+        par = read_report(par_path)
         targets = pd.read_excel(target_path)
 
         def par_normalize_column(col):

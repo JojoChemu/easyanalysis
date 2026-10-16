@@ -2,6 +2,14 @@
 
 EasyAnalysis is a production-oriented workspace for cleaning operational loan reports and generating RO performance dashboards.
 
+## Report preparation and arrears comparison
+
+Every source report is checked for a single title row before cleaning. A title is skipped only when the first row contains one non-empty title cell and the second contains recognizable column labels. Reports that already start with labels are read normally. Targets workbooks bypass this check.
+
+Loan Arrears Difference accepts two arrears CSV snapshots and the usual Excel targets workbook. Include a different date in each CSV filename, such as `LoanArrears-2026-10-01.csv` and `LoanArrears-2026-10-16.csv`; upload order does not matter. The older snapshot is the beginning balance. The supplied LoanArrearsDiff notebook's officer matching (60% token-sort threshold), targets master list, change calculations, ranking, and three formatted worksheets are preserved. An Executive Summary sheet also includes the notebook's summary figures.
+
+Run regression checks from the repository root with `python -m unittest discover -s backend/tests -v`, and build the frontend with `npm run build --prefix frontend`.
+
 ## Run locally
 
 ### Backend

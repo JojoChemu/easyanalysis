@@ -15,8 +15,30 @@ from backend.services.processing import (
     generate_par_performance,
 )
 from backend.utils.files import save_upload, validate_extension
+from backend.services.arrears_difference import generate_loan_arrears_difference
 
 router = APIRouter(tags=["processing"])
+
+
+@router.post("/loan-arrears-difference")
+async def loan_arrears_difference_endpoint(
+    first_file: UploadFile = File(...),
+    second_file: UploadFile = File(...),
+    targets_file: UploadFile = File(...),
+):
+    validate_extension(first_file, {".csv"})
+    validate_extension(second_file, {".csv"})
+    validate_extension(targets_file, {".xlsx", ".xls"})
+    with TemporaryDirectory(prefix="easyanalysis-") as directory:
+        first_path = await save_upload(first_file, Path(directory))
+        second_path = await save_upload(second_file, Path(directory))
+        targets_path = await save_upload(targets_file, Path(directory))
+        output_path = Path(directory) / "Arrears_Report.xlsx"
+        try:
+            generate_loan_arrears_difference(first_path, second_path, targets_path, output_path)
+        except ProcessingError as error:
+            raise _invalid_report(error) from error
+        return _download(output_path, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 
 def _invalid_report(error: ProcessingError) -> HTTPException:
