@@ -16,8 +16,26 @@ from backend.services.processing import (
 )
 from backend.utils.files import save_upload, validate_extension
 from backend.services.arrears_difference import generate_loan_arrears_difference
+from backend.services.year_to_date import generate_ro_year_to_date
 
 router = APIRouter(tags=["processing"])
+
+
+@router.post("/ro-year-to-date")
+async def ro_year_to_date_endpoint(
+    loan_file: UploadFile = File(...), targets_file: UploadFile = File(...)
+):
+    validate_extension(loan_file, {".csv"})
+    validate_extension(targets_file, {".xlsx", ".xls"})
+    with TemporaryDirectory(prefix="easyanalysis-") as directory:
+        loan_path = await save_upload(loan_file, Path(directory))
+        targets_path = await save_upload(targets_file, Path(directory))
+        output_path = Path(directory) / "RO_Year_To_Date_vs_Target.xlsx"
+        try:
+            generate_ro_year_to_date(loan_path, targets_path, output_path)
+        except ProcessingError as error:
+            raise _invalid_report(error) from error
+        return _download(output_path, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 
 @router.post("/loan-arrears-difference")

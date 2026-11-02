@@ -4,6 +4,8 @@ EasyAnalysis is a production-oriented workspace for cleaning operational loan re
 
 ## Report preparation and arrears comparison
 
+RO Year to Date vs Target accepts a complete year-to-date loan CSV and the usual monthly targets workbook. The latest disbursement date sets the reporting year and cutoff. Each RO's annual target is the monthly target multiplied by 12; the workbook shows YTD disbursement, remaining amount and achievement percentage, ranked by achievement. Performance hues are red below 50%, amber from 50%, light green from 80%, and green from 100%. Officers with no disbursements remain visible; unmatched officers and zero targets show a grey “No target” status with no percentage. A total row uses total disbursement divided by total annual target.
+
 Every source report is checked for a single title row before cleaning. A title is skipped only when the first row contains one non-empty title cell and the second contains recognizable column labels. Reports that already start with labels are read normally. Targets workbooks bypass this check.
 
 Loan Arrears Difference accepts two arrears CSV snapshots and the usual Excel targets workbook. Include a different date in each CSV filename, such as `LoanArrears-2026-10-01.csv` and `LoanArrears-2026-10-16.csv`; upload order does not matter. The older snapshot is the beginning balance. The supplied LoanArrearsDiff notebook's officer matching (60% token-sort threshold), targets master list, change calculations, ranking, and three formatted worksheets are preserved. An Executive Summary sheet also includes the notebook's summary figures.

@@ -7,6 +7,7 @@ import "./workspace.css";
 
 const API = import.meta.env.VITE_API_URL || "";
 const services = [
+  { id: "ro-year-to-date", title: "RO Year to Date vs Target", icon: BarChart3, purpose: "Compare each RO’s year-to-date disbursement with their monthly target × 12. See achievement percentages, remaining amounts, and performance colour hues. Reporting year and cutoff follow the latest disbursement date in your file.", required: "Full year-to-date Loan CSV + monthly Targets.xlsx", output: "RO_Year_To_Date_vs_Target.xlsx", endpoint: "/api/ro-year-to-date", fields: ["loan_file", "targets_file"] },
   { id: "arrears-difference", title: "Loan Arrears Difference", icon: Activity, purpose: "Compare beginning and current arrears, match officers to targets, and rank changes in a formatted workbook.", required: "Two dated arrears CSVs + Targets.xlsx", output: "Arrears_Report.xlsx", endpoint: "/api/loan-arrears-difference", fields: ["first_file", "second_file", "targets_file"] },
   { id: "all-loans", title: "Clean All Loans", icon: FileSpreadsheet, purpose: "Standardize loan records, dates, branches, money fields, and remove summary rows.", required: "One CSV loan report", output: "AllLoans_Clean.csv", endpoint: "/api/clean-all-loans", fields: ["file"] },
   { id: "portfolio-risk", title: "Portfolio Risk", icon: ShieldCheck, purpose: "Prepare a consistent portfolio-at-risk report for analysis and review.", required: "One CSV portfolio risk report", output: "PortfolioRiskReport_Clean.csv", endpoint: "/api/clean-portfolio-risk", fields: ["file"] },
